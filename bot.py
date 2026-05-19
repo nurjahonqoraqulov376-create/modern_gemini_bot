@@ -98,12 +98,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = await ask_gemini(text)
         await update.message.reply_text(response)
     else:
-        # Boshqalar yozganda: Egaga xabar yetib boradi
+        # Boshqalar yozganda: Egaga xabar YASHIRINCHA yetib boradi
         try:
             keyboard = [[InlineKeyboardButton("💬 Javob berish", callback_data=f"reply_{chat_id}")]]
             await context.bot.send_message(
                 chat_id=OWNER_CHAT_ID,
-                text=f"📩 <b>Foydalanuvchidan xabar:</b>\n"
+                text=f"📩 <b>Foydalanuvchidan yangi xabar:</b>\n"
                      f"👤 {user.first_name} (ID: {chat_id})\n\n"
                      f"💬 <i>{text}</i>",
                 parse_mode="HTML",
@@ -112,10 +112,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Egaga xabar nusxasini yuborishda xato: {e}")
 
-        # Foydalanuvchining o'ziga AI javob qaytaradi
+        # Foydalanuvchining o'ziga faqat AI javob qaytaradi (ortiqcha yozuvlarsiz)
         response = await ask_gemini(text)
         await update.message.reply_text(response)
-
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_chat.id):
