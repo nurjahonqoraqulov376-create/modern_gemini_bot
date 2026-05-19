@@ -1,328 +1,208 @@
 import os
 import logging
-import asyncio
 from datetime import datetime
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     filters, ContextTypes, CallbackQueryHandler
 )
-import anthropic
+from google import genai
+from google.genai import types
 
-# ============================================================
-#  SOZLAMALAR — bu yerga o'z ma'lumotlaringizni kiriting
-# ============================================================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-# Diqqat: Railway'dagi ANTHROPIC_API_KEY o'zgaruvchisiga OpenRouter'dan olgan sk-or-... kalitingizni qo'ying
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "YOUR_ANTHROPIC_API_KEY_HERE")
-OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID_HERE"))
-# ============================================================
+# .env faylidan kalitlarni yuklash
+load_dotenv()
 
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "0"))
+
+# Loglarni sozlash
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Anthropic klientini OpenRouter bepul xizmatiga ulaymiz
-ai_client = anthropic.Anthropic(
-    api_key=ANTHROPIC_API_KEY,
-    base_url="https://openrouter.ai/api/v1"
-)
+# Yangi Rasmiy Google GenAI Klienti
+ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Xabarlar xotirasi (conversation history)
-conversation_history: dict = {}
-
-# Xabar kutish ro'yxati (owner offline bo'lganda)
-pending_messages: list = []
+# Suhbatlar xotirasi (Chat tarixi)
+chats: dict = {}
 
 
 def is_owner(chat_id: int) -> bool:
-    """Foydalanuvchi bot egasimi yoki yo'q"""
     return chat_id == OWNER_CHAT_ID
 
 
-async def get_owner_status(bot) -> bool:
-    """Owner onlayn yoki offlayn ekanligini tekshirish"""
+async def ask_gemini(chat_id: int, user_message: str) -> str:
+    """Google Gemini modelidan jonli qidiruv (Google Search) bilan javob olish"""
     try:
-        return True  # Default: onlayn deb hisoblaymiz
-    except Exception:
-        return False
+        # Har bir foydalanuvchi uchun alohida chat sessiyasi ochiladi (kontekst uchun)
+        if chat_id not in chats:
+            chats[chat_id] = ai_client.chats.create(
+                model="gemini-2.5-flash",
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        "Siz foydali, aqlli va do'stona AI yordamchisiz. "
+                        "Foydalanuvchi qaysi tilda yozsa, o'sha tilda chiroyli javob bering. "
+                        "Sizda Google Search funksiyasi bor, ob-havo yoki yangiliklar so'ralsa, "
+                        "jonli internet ma'lumotlaridan foydalaning."
+                    ),
+                    # MANA SHU JOYI GOOGLE QIDIRUVINI YOQIB BERADI (Ob-havo va h.k. uchun)
+                    tools=[{"google_search": {}}]
+                )
+            )
 
+        # AI'ga xabarni yuborish
+        response = chats[chat_id].send_message(user_message)
+        return response.text
 
-async def ask_claude(user_id: int, user_message: str) -> str:
-    """OpenRouter orqali bepul modeldan javob olish"""
-    if user_id not in conversation_history:
-        conversation_history[user_id] = []
-
-    conversation_history[user_id].append({
-        "role": "user",
-        "content": user_message
-    })
-
-    # Oxirgi 20 ta xabarni saqlaymiz (kontekst uchun)
-    history = conversation_history[user_id][-20:]
-
-    try:
-        # Modelni bepul OpenRouter modeliga almashtirdik
-        response = ai_client.messages.create(
-            model="google/gemini-2.5-flash:free",
-            max_tokens=2048,
-            system="""Siz foydali, aqlli va do'stona AI yordamchisiz. 
-            Uzbek tilida ham, rus tilida ham, ingliz tilida ham javob bera olasiz.
-            Foydalanuvchi qaysi tilda yozsa, o'sha tilda javob bering.
-            Aniq, qisqa va tushunarli javoblar bering.""",
-            messages=history
-        )
-
-        assistant_message = response.content[0].text
-        conversation_history[user_id].append({
-            "role": "assistant",
-            "content": assistant_message
-        })
-
-        return assistant_message
-
-    except anthropic.APIError as e:
-        logger.error(f"OpenRouter API xatosi: {e}")
-        return "❌ AI bilan bog'lanishda xato yuz berdi. Iltimos, keyinroq urinib ko'ring."
+    except Exception as e:
+        logger.error(f"Gemini API xatosi: {e}")
+        return "❌ Sun'iy intellekt bilan bog'lanishda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring."
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bot ishga tushganda"""
     user = update.effective_user
     chat_id = update.effective_chat.id
 
     if is_owner(chat_id):
         await update.message.reply_text(
             f"👋 Salom, Xo'jayin!\n\n"
-            f"🤖 Botingiz ishga tushdi va tayyor!\n\n"
-            f"📋 <b>Buyruqlar:</b>\n"
-            f"• /start — Botni qayta ishga tushirish\n"
-            f"• /clear — Suhbat tarixini tozalash\n"
-            f"• /pending — Kutayotgan xabarlar\n"
-            f"• /status — Bot holati\n\n"
-            f"💬 Istalgan savolni yuboring — AI javob beradi!",
+            f"🤖 Yangi zamonaviy Gemini botingiz muvaffaqiyatli ishga tushdi!\n"
+            f"Internet qidiruvi (Google Search) faol. Ob-havo va yangiliklarni ham biladi.\n\n"
+            f"📋 Buyruqlar:\n"
+            f"• /start — Qayta ishga tushirish\n"
+            f"• /status — Bot holati",
             parse_mode="HTML"
         )
     else:
-        await notify_owner_about_visitor(context.bot, user, chat_id)
-
-        keyboard = [[InlineKeyboardButton("📨 Xabar qoldirish", callback_data=f"leave_message_{chat_id}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Egaga xabar berish (Yangi odam keldi)
+        try:
+            await context.bot.send_message(
+                chat_id=OWNER_CHAT_ID,
+                text=f"🔔 <b>Yangi foydalanuvchi!</b>\n"
+                     f"👤 Ism: {user.first_name}\n"
+                     f"🆔 Username: @{user.username if user.username else 'yoq'}\n"
+                     f"📋 Chat ID: <code>{chat_id}</code>",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Egani ogohlantirishda xato: {e}")
 
         await update.message.reply_text(
             f"👋 Salom, {user.first_name}!\n\n"
-            f"🤖 Men aqlli AI yordamchiman.\n"
-            f"Istalgan savolingizni yuboring — javob beraman!\n\n"
-            f"📨 Yoki bot egasiga xabar qoldirishingiz mumkin.",
-            reply_markup=reply_markup
+            f"🤖 Men zamonaviy Google Gemini AI yordamchisiman.\n"
+            f"Menga istalgan savolingizni berishingiz mumkin.\n"
+            f"Jonli ob-havo, valyuta kurslari va yangiliklarni ham topib bera olaman! 🌍"
         )
-
-
-async def notify_owner_about_visitor(bot, visitor, visitor_chat_id: int):
-    """Egaga yangi tashrif haqida xabar berish"""
-    name = visitor.first_name or ""
-    last_name = visitor.last_name or ""
-    username = f"@{visitor.username}" if visitor.username else "username yo'q"
-    now = datetime.now().strftime("%H:%M, %d.%m.%Y")
-
-    try:
-        keyboard = [[
-            InlineKeyboardButton("💬 Javob berish", callback_data=f"reply_to_{visitor_chat_id}")
-        ]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await bot.send_message(
-            chat_id=OWNER_CHAT_ID,
-            text=f"🔔 <b>Yangi tashrif!</b>\n\n"
-                 f"👤 Ism: {name} {last_name}\n"
-                 f"🆔 Username: {username}\n"
-                 f"📋 Chat ID: <code>{visitor_chat_id}</code>\n"
-                 f"🕐 Vaqt: {now}",
-            parse_mode="HTML",
-            reply_markup=reply_markup
-        )
-    except Exception as e:
-        logger.error(f"Egaga xabar yuborishda xato: {e}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Barcha xabarlarni qayta ishlash"""
     chat_id = update.effective_chat.id
     user = update.effective_user
     text = update.message.text
 
+    # "Typing..." animatsiyasini chiqarish
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
     if is_owner(chat_id):
-        response = await ask_claude(chat_id, text)
+        # Ega yozganda AI javobi
+        response = await ask_gemini(chat_id, text)
         await update.message.reply_text(response)
-
     else:
-        name = user.first_name or "Noma'lum"
-        username = f"@{user.username}" if user.username else f"ID: {chat_id}"
-        now = datetime.now().strftime("%H:%M")
-
+        # Boshqalar yozganda ham AI javob beradi + Egaga nusxasi boradi
         try:
-            keyboard = [[
-                InlineKeyboardButton("💬 Javob berish", callback_data=f"reply_to_{chat_id}")
-            ]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
+            keyboard = [[InlineKeyboardButton("💬 Javob berish", callback_data=f"reply_{chat_id}")]]
             await context.bot.send_message(
                 chat_id=OWNER_CHAT_ID,
-                text=f"📩 <b>Yangi xabar!</b>\n"
-                     f"👤 {name} ({username})\n"
-                     f"🕐 {now}\n\n"
+                text=f"📩 <b>Foydalanuvchidan xabar:</b>\n"
+                     f"👤 {user.first_name} (@{user.username if user.username else chat_id})\n\n"
                      f"💬 <i>{text}</i>",
                 parse_mode="HTML",
-                reply_markup=reply_markup
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
         except Exception as e:
-            logger.error(f"Egaga xabar yuborishda xato: {e}")
+            logger.error(f"Egaga xabar nusxasini yuborishda xato: {e}")
 
-        response = await ask_claude(chat_id, text)
-        await update.message.reply_text(
-            f"🤖 {response}\n\n"
-            f"─────────────────\n"
-            f"📨 Bot egasiga ham xabar yetkazildi."
-        )
-
-        pending_messages.append({
-            "from": name,
-            "username": username,
-            "chat_id": chat_id,
-            "text": text,
-            "time": datetime.now().strftime("%H:%M, %d.%m.%Y")
-        })
-
-
-async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Suhbat tarixini tozalash"""
-    chat_id = update.effective_chat.id
-    if is_owner(chat_id):
-        conversation_history.pop(chat_id, None)
-        await update.message.reply_text("🗑️ Suhbat tarixi tozalandi!")
-    else:
-        conversation_history.pop(chat_id, None)
-        await update.message.reply_text("🗑️ Suhbatingiz tarixi tozalandi!")
-
-
-async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kutayotgan xabarlarni ko'rish (faqat ega uchun)"""
-    chat_id = update.effective_chat.id
-    if not is_owner(chat_id):
-        return
-
-    if not pending_messages:
-        await update.message.reply_text("📭 Hozircha kutayotgan xabar yo'q.")
-        return
-
-    text = f"📬 <b>Kutayotgan xabarlar ({len(pending_messages)} ta):</b>\n\n"
-    for i, msg in enumerate(pending_messages[-10:], 1):
-        text += (
-            f"{i}. 👤 {msg['from']} ({msg['username']})\n"
-            f"   🕐 {msg['time']}\n"
-            f"   💬 {msg['text'][:100]}{'...' if len(msg['text']) > 100 else ''}\n\n"
-        )
-
-    await update.message.reply_text(text, parse_mode="HTML")
+        # Foydalanuvchiga AI'dan javob
+        response = await ask_gemini(chat_id, text)
+        await update.message.reply_text(response)
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Bot holati (faqat ega uchun)"""
-    chat_id = update.effective_chat.id
-    if not is_owner(chat_id):
+    if not is_owner(update.effective_chat.id):
         return
-
-    active_chats = len(conversation_history)
-    pending_count = len(pending_messages)
     now = datetime.now().strftime("%H:%M, %d.%m.%Y")
-
     await update.message.reply_text(
-        f"📊 <b>Bot holati</b>\n\n"
-        f"🟢 Status: Ishlamoqda\n"
+        f"📊 <b>Bot Holati:</b>\n\n"
+        f"🟢 Status: Faol va ishlamoqda\n"
         f"🕐 Vaqt: {now}\n"
-        f"💬 Faol suhbatlar: {active_chats} ta\n"
-        f"📨 Kutayotgan xabarlar: {pending_count} ta\n"
-        f"🤖 AI Model: Gemini 2.5 Flash (OpenRouter)",
+        f"🤖 AI Model: Google Gemini 2.5 Flash\n"
+        f"🌐 Google Search: Yoqilgan (Onlayn)",
         parse_mode="HTML"
     )
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inline tugmalar uchun handler"""
     query = update.callback_query
     await query.answer()
-    data = query.data
 
-    if data.startswith("reply_to_"):
-        target_chat_id = int(data.split("_")[-1])
-        context.user_data["replying_to"] = target_chat_id
+    if query.data.startswith("reply_"):
+        target_id = int(query.data.split("_")[1])
+        context.user_data["reply_to_user"] = target_id
         await query.message.reply_text(
-            f"✏️ Javob yozing (Chat ID: <code>{target_chat_id}</code>)\n"
-            f"Keyingi xabaringiz shu foydalanuvchiga yuboriladi.\n\n"
-            f"/cancel — bekor qilish",
-            parse_mode="HTML"
+            f"✏️ Foydalanuvchiga javobingizni yozing (ID: {target_id}):\n"
+            f"Bekor qilish uchun /cancel yozing."
         )
 
-    elif data.startswith("leave_message_"):
-        await query.message.reply_text(
-            "📝 Egaga qoldirmoqchi bo'lgan xabaringizni yuboring:"
-        )
-        context.user_data["leaving_message"] = True
 
-
-async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Eganing kimgadir javob berishi"""
+async def handle_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text
 
-    if not is_owner(chat_id):
+    if not is_owner(chat_id) or "reply_to_user" not in context.user_data:
+        # Oddiy xabar sifatida qayta ishlashga yuboramiz
+        await handle_message(update, context)
         return
 
-    if "replying_to" in context.user_data:
-        target_id = context.user_data["replying_to"]
+    target_id = context.user_data["reply_to_user"]
 
-        if text == "/cancel":
-            del context.user_data["replying_to"]
-            await update.message.reply_text("❌ Bekor qilindi.")
-            return
+    if text == "/cancel":
+        del context.user_data["reply_to_user"]
+        await update.message.reply_text("❌ Javob berish bekor qilindi.")
+        return
 
-        try:
-            await context.bot.send_message(
-                chat_id=target_id,
-                text=f"📨 <b>Bot egasidan xabar:</b>\n\n{text}",
-                parse_mode="HTML"
-            )
-            del context.user_data["replying_to"]
-            await update.message.reply_text("✅ Xabar yuborildi!")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Xabar yuborishda xato: {e}")
+    try:
+        await context.bot.send_message(
+            chat_id=target_id,
+            text=f"📨 <b>Bot egasidan javob:</b>\n\n{text}",
+            parse_mode="HTML"
+        )
+        await update.message.reply_text("✅ Javobingiz muvaffaqiyatli yuborildi!")
+        del context.user_data["reply_to_user"]
+    except Exception as e:
+        await update.message.reply_text(f"❌ Xabar ketmadi. Xatolik: {e}")
 
 
 def main():
-    """Botni ishga tushirish"""
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("clear", clear_command))
-    app.add_handler(CommandHandler("pending", pending_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
+    # Ega kimgadir javob yozayotganini tekshirish filtri
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.Chat(OWNER_CHAT_ID),
-        handle_reply
+        handle_owner_reply
     ))
 
-    app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        handle_message
-    ))
+    # Boshqa hamma xabarlar uchun
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("🤖 Bot ishga tushdi!")
+    logger.info("🚀 Yangi zamonaviy Gemini bot ishga tushdi!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

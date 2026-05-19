@@ -1,92 +1,40 @@
-# 🤖 Shaxsiy AI Telegram Bot
+# 🤖 Shaxsiy Modern AI Telegram Bot
 
-Claude AI bilan ishlaydigan shaxsiy Telegram bot.
+Rasmiy Google GenAI (Gemini 2.5 Flash) modelida va jonli internet qidiruvi (Google Search) bilan ishlaydigan zamonaviy shaxsiy Telegram bot.
 
 ## ✨ Imkoniyatlar
 
-- 🤖 **Claude AI** bilan suhbat — istalgan savolga javob
-- 📨 **Xabar qoldirish** — boshqalar sizga xabar qoldira oladi
-- 🔔 **Ogohlantirish** — yangi tashrif va xabarlar haqida xabardor bo'lasiz
-- 💬 **Javob berish** — xabar qoldirgan odamlarga javob yuborish
-- 📊 **Statistika** — bot holati va faol suhbatlar
+* 🌐 **Google Search (Onlayn qidiruv):** Bot jonli internet ma'lumotlariga ulangan. Ob-havo, valyuta kurslari va eng so'nggi yangiliklarni topib bera oladi!
+* 🧠 **Google Gemini 2.5 Flash:** Eng tezkor va aqlli AI modeli bilan do'stona muloqot.
+* 📩 **Xabar qoldirish & Ega bilan aloqa:** Boshqa foydalanuvchilar yozgan xabarlar sizga keladi va siz to'g'ridan-to'g'ri bot orqali ularga javob bera olasiz.
+* 📊 **Statistika:** Bot holati va uning real vaqtdagi ish faoliyati.
 
 ## 🚀 Boshlash
 
 ### 1. Telegram Bot Token olish
-1. Telegramda **@BotFather** ga yozing
-2. `/newbot` yuboring
-3. Botga nom va username bering
-4. **TOKEN** ni nusxalab saqlang
+* Telegramda `@BotFather` ga yozing.
+* `/newbot` yuboring.
+* Botga nom va username bering.
+* **TOKEN** ni nusxalab saqlang.
 
-### 2. Anthropic API kalit olish
-1. **https://console.anthropic.com** ga kiring
-2. Google akkount bilan ro'yxatdan o'ting
-3. **API Keys → Create Key** tugmasini bosing
-4. Kalitni nusxalab saqlang
+### 2. Google Gemini API kalit olish
+* [aistudio.google.com](https://aistudio.google.com/) sahifasiga kiring.
+* Google akkauntingiz bilan ro'yxatdan o'ting.
+* **Get API Key** -> **Create API Key** tugmasini bosing.
+* `AIzaSy...` deb boshlanuvchi kalitni nusxalab saqlang.
 
 ### 3. O'z Chat ID'ingizni bilish
-1. Telegramda **@userinfobot** ga `/start` yuboring
-2. Ko'rsatilgan raqam sizning **Chat ID** ingiz
+* Telegramda `@userinfobot` ga `/start` yuboring.
+* Ko'rsatilgan raqam sizning shaxsiy Chat ID raqamingiz hisoblanadi.
 
-### 4. Render.com ga joylashtirish (BEPUL)
+### 4. Railway.app platformasiga joylashtirish (Serverga yuklash)
 
-#### GitHub ga yuklash:
+**GitHub ga yuklash:**
+PyCharm terminalida quyidagi buyruqlarni bittalab ishlating:
 ```bash
 git init
 git add .
-git commit -m "Bot yaratildi"
-git remote add origin https://github.com/YOUR_USERNAME/my-telegram-bot.git
+git commit -m "Modern Gemini Bot initialized"
+git branch -M main
+git remote add origin [https://github.com/YOUR_USERNAME/my-telegram-bot.git](https://github.com/YOUR_USERNAME/my-telegram-bot.git)
 git push -u origin main
-```
-
-#### Render.com sozlash:
-1. **https://render.com** ga kiring (Google bilan kirish mumkin)
-2. **New → Web Service** tugmasini bosing
-3. GitHub repozitoriyangizni tanlang
-4. Quyidagi sozlamalarni kiriting:
-   - **Environment**: Python 3
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python bot.py`
-5. **Environment Variables** bo'limiga quyidagilarni qo'shing:
-   ```
-   BOT_TOKEN = sizning_bot_tokeningiz
-   ANTHROPIC_API_KEY = sizning_api_kalitingiz
-   OWNER_CHAT_ID = sizning_chat_id_raqamingiz
-   ```
-6. **Create Web Service** tugmasini bosing
-
-Bot 2-3 daqiqada ishga tushadi! ✅
-
-## 📋 Buyruqlar
-
-| Buyruq | Tavsif |
-|--------|--------|
-| `/start` | Botni ishga tushirish |
-| `/clear` | Suhbat tarixini tozalash |
-| `/pending` | Kutayotgan xabarlar (faqat siz uchun) |
-| `/status` | Bot holati (faqat siz uchun) |
-
-## 🔧 Mahalliy ishga tushirish
-
-```bash
-# Paketlarni o'rnatish
-pip install -r requirements.txt
-
-# .env fayl yaratish
-cp .env.example .env
-# .env faylini oching va ma'lumotlaringizni kiriting
-
-# Botni ishga tushirish
-python bot.py
-```
-
-## 📁 Fayl tuzilishi
-
-```
-telegram_bot/
-├── bot.py           # Asosiy bot kodi
-├── requirements.txt # Python paketlar
-├── render.yaml      # Render.com sozlamalari
-├── .env.example     # Sozlamalar namunasi
-└── README.md        # Ushbu fayl
-```
