@@ -13,6 +13,7 @@ import anthropic
 #  SOZLAMALAR — bu yerga o'z ma'lumotlaringizni kiriting
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+# Diqqat: Railway'dagi ANTHROPIC_API_KEY o'zgaruvchisiga OpenRouter'dan olgan sk-or-... kalitingizni qo'ying
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "YOUR_ANTHROPIC_API_KEY_HERE")
 OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID_HERE"))
 # ============================================================
@@ -23,8 +24,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Anthropic klienti
-ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+# Anthropic klientini OpenRouter bepul xizmatiga ulaymiz
+ai_client = anthropic.Anthropic(
+    api_key=ANTHROPIC_API_KEY,
+    base_url="https://openrouter.ai/api/v1"
+)
 
 # Xabarlar xotirasi (conversation history)
 conversation_history: dict = {}
@@ -41,15 +45,13 @@ def is_owner(chat_id: int) -> bool:
 async def get_owner_status(bot) -> bool:
     """Owner onlayn yoki offlayn ekanligini tekshirish"""
     try:
-        # Telegram API orqali foydalanuvchi statusini tekshiramiz
-        # Bu yerda webhook yoki polling orqali oxirgi aktivlik vaqtini kuzatamiz
         return True  # Default: onlayn deb hisoblaymiz
     except Exception:
         return False
 
 
 async def ask_claude(user_id: int, user_message: str) -> str:
-    """Claude AI dan javob olish"""
+    """OpenRouter orqali bepul modeldan javob olish"""
     if user_id not in conversation_history:
         conversation_history[user_id] = []
 
@@ -62,8 +64,9 @@ async def ask_claude(user_id: int, user_message: str) -> str:
     history = conversation_history[user_id][-20:]
 
     try:
+        # Modelni bepul OpenRouter modeliga almashtirdik
         response = ai_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="google/gemini-2.5-flash:free",
             max_tokens=2048,
             system="""Siz foydali, aqlli va do'stona AI yordamchisiz. 
             Uzbek tilida ham, rus tilida ham, ingliz tilida ham javob bera olasiz.
@@ -81,7 +84,7 @@ async def ask_claude(user_id: int, user_message: str) -> str:
         return assistant_message
 
     except anthropic.APIError as e:
-        logger.error(f"Anthropic API xatosi: {e}")
+        logger.error(f"OpenRouter API xatosi: {e}")
         return "❌ AI bilan bog'lanishda xato yuz berdi. Iltimos, keyinroq urinib ko'ring."
 
 
@@ -103,7 +106,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
     else:
-        # Egaga xabar yuborish - yangi foydalanuvchi keldi
         await notify_owner_about_visitor(context.bot, user, chat_id)
 
         keyboard = [[InlineKeyboardButton("📨 Xabar qoldirish", callback_data=f"leave_message_{chat_id}")]]
@@ -151,17 +153,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
 
-    # Typing animatsiyasi
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
     if is_owner(chat_id):
-        # Ega o'zi yozayapti — AI bilan suhbat
         response = await ask_claude(chat_id, text)
         await update.message.reply_text(response)
 
     else:
-        # Boshqa foydalanuvchi yozayapti
-        # Egaga xabar haqida xabar berish
         name = user.first_name or "Noma'lum"
         username = f"@{user.username}" if user.username else f"ID: {chat_id}"
         now = datetime.now().strftime("%H:%M")
@@ -184,7 +182,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Egaga xabar yuborishda xato: {e}")
 
-        # Foydalanuvchiga AI javob berish
         response = await ask_claude(chat_id, text)
         await update.message.reply_text(
             f"🤖 {response}\n\n"
@@ -192,7 +189,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📨 Bot egasiga ham xabar yetkazildi."
         )
 
-        # Kutayotgan xabarlar ro'yxatiga qo'shish
         pending_messages.append({
             "from": name,
             "username": username,
@@ -250,7 +246,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🕐 Vaqt: {now}\n"
         f"💬 Faol suhbatlar: {active_chats} ta\n"
         f"📨 Kutayotgan xabarlar: {pending_count} ta\n"
-        f"🤖 AI Model: Claude Sonnet 4",
+        f"🤖 AI Model: Gemini 2.5 Flash (OpenRouter)",
         parse_mode="HTML"
     )
 
@@ -259,7 +255,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Inline tugmalar uchun handler"""
     query = update.callback_query
     await query.answer()
-
     data = query.data
 
     if data.startswith("reply_to_"):
@@ -311,20 +306,17 @@ def main():
     """Botni ishga tushirish"""
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Handlerlar
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("pending", pending_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    # Ega uchun reply handler
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.Chat(OWNER_CHAT_ID),
         handle_reply
     ))
 
-    # Barcha boshqa xabarlar
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_message
