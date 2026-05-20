@@ -1,0 +1,59 @@
+# ================================================
+# Jarvis Yordamchim — Render.com Deploy
+# ================================================
+# render.yaml faylingiz
+
+services:
+  # 1. Telegram Bot (Web Service)
+  - type: web
+    name: jarvis-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false  # Dashboard'da qo'lda kiritasiz
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: jarvis-redis
+          property: connectionString
+      - key: WEATHER_API_KEY
+        sync: false
+
+  # 2. Celery Worker (Background Worker)
+  - type: worker
+    name: jarvis-worker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery --app tasks worker --loglevel info --concurrency 4
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: jarvis-redis
+          property: connectionString
+      - key: WEATHER_API_KEY
+        sync: false
+
+  # 3. Flower Monitor (ixtiyoriy)
+  - type: web
+    name: jarvis-flower
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery flower --app tasks --loglevel info
+    envVars:
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: jarvis-redis
+          property: connectionString
+
+# Redis
+databases:
+  - type: redis
+    name: jarvis-redis
+    maxmemoryPolicy: noeviction
+    plan: starter

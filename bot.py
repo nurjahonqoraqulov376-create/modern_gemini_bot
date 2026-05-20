@@ -1,180 +1,308 @@
-import os
+"""
+Jarvis Yordamchim - Telegram Bot
+Celery orqali background vazifalarni bajaradi
+"""
+
 import logging
-from datetime import datetime
-from dotenv import load_dotenv
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    filters, ContextTypes, CallbackQueryHandler
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
 )
-import google.generativeai as genai
+from tasks import (
+    analyze_text_task,
+    translate_text_task,
+    summarize_text_task,
+    weather_task,
+    reminder_task,
+)
 
-# .env faylidan yuklash
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-OWNER_CHAT_ID = int(os.getenv("OWNER_CHAT_ID", "0"))
-
+# Logging sozlash
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# Gemini API ni sozlash
-genai.configure(api_key=GEMINI_API_KEY)
-
-# O'q o'tmas va barqaror model sozlamasi
-# Tizim har bir xabarga alohida va xatoliksiz, internet qidiruvi bilan javob beradi
-generation_config = {
-    "temperature": 0.7,
-    "top_p": 0.95,
-    "top_k": 40,
-    "max_output_tokens": 2048,
-}
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    generation_config=generation_config
-)
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
 
-def is_owner(chat_id: int) -> bool:
-    return chat_id == OWNER_CHAT_ID
+# ===================== BUYRUQLAR =====================
 
-
-async def ask_gemini(user_message: str) -> str:
-    """Xatoliklardan to'liq himoyalangan Gemini API funksiyasi"""
-    try:
-        # Chat sessiyasidagi konfliktlarni chetlab o'tish uchun to'g'ridan-to'g'ri kontent generatsiya qilamiz
-        response = model.generate_content(user_message)
-        if response.text:
-            return response.text
-        return "⚠️ AI tushunarli javob qaytara olmadi. Qaytadan so'rab ko'ring."
-    except Exception as e:
-        logger.error(f"Gemini jiddiy xatolik: {e}")
-        return "❌ Sun'iy intellekt tizimida vaqtincha uzilish bo'ldi. Birozdan so'ng urinib ko'ring."
-
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Botni boshlash"""
     user = update.effective_user
+    keyboard = [
+        [
+            InlineKeyboardButton("📝 Matn tahlili", callback_data="analyze"),
+            InlineKeyboardButton("🌍 Tarjima", callback_data="translate"),
+        ],
+        [
+            InlineKeyboardButton("📋 Xulosa", callback_data="summarize"),
+            InlineKeyboardButton("🌤 Ob-havo", callback_data="weather"),
+        ],
+        [
+            InlineKeyboardButton("⏰ Eslatma", callback_data="reminder"),
+            InlineKeyboardButton("❓ Yordam", callback_data="help"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    if is_owner(chat_id):
-        await update.message.reply_text(
-            "👋 Salom, Xo'jayin!\n🤖 Yangi Gemini botingiz 100% xavfsiz rejimda ishga tushdi.\n\n/status — Bot holati"
-        )
-    else:
-        # Egaga bildirishnoma yuborish
-        try:
-            await context.bot.send_message(
-                chat_id=OWNER_CHAT_ID,
-                text=f"🔔 <b>Yangi foydalanuvchi botni boshladi:</b>\n"
-                     f"👤 Ism: {user.first_name}\n"
-                     f"🆔 ID: <code>{chat_id}</code>",
-                parse_mode="HTML"
-            )
-        except:
-            pass
-
-        await update.message.reply_text(
-            f"👋 Salom, {user.first_name}!\n\n"
-            f"🤖 Men aqlli AI yordamchiman. Istalgan savolingizni yuboring — javob beraman!\n\n"
-            f"🌍 Ob-havo, valyuta kurslari va eng so'nggi yangiliklarni ham jonli internet qidiruvi orqali topib bera olaman."
-        )
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-    text = update.message.text
-
-    # Bot o'ylayotganini bildirish uchun "typing..." animatsiyasi
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-    if is_owner(chat_id):
-        # Ega yozganda to'g'ridan-to'g'ri AI javob beradi
-        response = await ask_gemini(text)
-        await update.message.reply_text(response)
-    else:
-        # Boshqalar yozganda: Egaga xabar YASHIRINCHA yetib boradi
-        try:
-            keyboard = [[InlineKeyboardButton("💬 Javob berish", callback_data=f"reply_{chat_id}")]]
-            await context.bot.send_message(
-                chat_id=OWNER_CHAT_ID,
-                text=f"📩 <b>Foydalanuvchidan yangi xabar:</b>\n"
-                     f"👤 {user.first_name} (ID: {chat_id})\n\n"
-                     f"💬 <i>{text}</i>",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        except Exception as e:
-            logger.error(f"Egaga xabar nusxasini yuborishda xato: {e}")
-
-        # Foydalanuvchining o'ziga faqat AI javob qaytaradi (ortiqcha yozuvlarsiz)
-        response = await ask_gemini(text)
-        await update.message.reply_text(response)
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_owner(update.effective_chat.id):
-        return
     await update.message.reply_text(
-        f"📊 <b>Bot Holati:</b>\n🟢 Status: Aktiv\n🤖 Model: Gemini 1.5 Flash\n🌐 Qidiruv (Search): Yoqilgan",
-        parse_mode="HTML"
+        f"👋 Salom, {user.first_name}!\n\n"
+        "🤖 Men **Jarvis Yordamchim** — sizning aqlli yordamchingiz.\n\n"
+        "⚡ Barcha vazifalar *background*da ishlaydi — kutib o'tirmang!\n\n"
+        "Quyidagi buyruqlardan birini tanlang:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown",
     )
 
 
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Yordam"""
+    help_text = (
+        "🤖 *Jarvis Yordamchim — Buyruqlar:*\n\n"
+        "📝 `/analyze <matn>` — Matnni tahlil qilish\n"
+        "🌍 `/translate <matn>` — Matnni inglizchaga tarjima qilish\n"
+        "📋 `/summarize <matn>` — Matnni qisqacha xulosa qilish\n"
+        "🌤 `/weather <shahar>` — Ob-havo ma'lumoti\n"
+        "⏰ `/reminder <daqiqa> <xabar>` — Eslatma o'rnatish\n"
+        "📊 `/status` — Faol vazifalar holati\n\n"
+        "💡 *Maslahat:* Barcha vazifalar Celery orqali bajariladi.\n"
+        "Siz kutmasangiz ham, natija tayyor bo'lganda yuboriladi!"
+    )
+    await update.message.reply_text(help_text, parse_mode="Markdown")
 
-    if query.data.startswith("reply_"):
-        target_id = int(query.data.split("_")[1])
-        context.user_data["reply_to_user"] = target_id
-        await query.message.reply_text(
-            f"✏️ Foydalanuvchiga javob matnini yozing (ID: {target_id}):\n"
-            f"Bekor qilish uchun /cancel yozing."
+
+async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/analyze buyrug'i"""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Matn kiriting!\n📝 Misol: `/analyze Bu juda ajoyib kitob!`",
+            parse_mode="Markdown",
         )
-
-
-async def handle_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    text = update.message.text
-
-    if not is_owner(chat_id) or "reply_to_user" not in context.user_data:
-        await handle_message(update, context)
         return
 
-    target_id = context.user_data["reply_to_user"]
+    text = " ".join(context.args)
+    chat_id = update.effective_chat.id
 
-    if text == "/cancel":
-        del context.user_data["reply_to_user"]
-        await update.message.reply_text("❌ Javob berish bekor qilindi.")
+    await update.message.reply_text(
+        "⏳ Matn tahlil qilinmoqda... Natija tayor bo'lgach xabar beraman!"
+    )
+
+    # Celery vazifasini background'da ishga tushirish
+    task = analyze_text_task.delay(chat_id, text)
+
+    # Task ID ni saqlash
+    if context.user_data.get("tasks") is None:
+        context.user_data["tasks"] = []
+    context.user_data["tasks"].append({"id": task.id, "type": "analyze", "text": text[:30]})
+
+    logger.info(f"Tahlil vazifasi boshlandi: {task.id} | Foydalanuvchi: {chat_id}")
+
+
+async def translate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/translate buyrug'i"""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Matn kiriting!\n🌍 Misol: `/translate Salom dunyo`",
+            parse_mode="Markdown",
+        )
+        return
+
+    text = " ".join(context.args)
+    chat_id = update.effective_chat.id
+
+    await update.message.reply_text(
+        "⏳ Tarjima qilinmoqda... Tez orada natija yuboraman!"
+    )
+
+    task = translate_text_task.delay(chat_id, text)
+    logger.info(f"Tarjima vazifasi: {task.id}")
+
+
+async def summarize_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/summarize buyrug'i"""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Matn kiriting!\n📋 Misol: `/summarize <uzun matn>`",
+            parse_mode="Markdown",
+        )
+        return
+
+    text = " ".join(context.args)
+    chat_id = update.effective_chat.id
+
+    await update.message.reply_text(
+        "⏳ Matn qisqartirilmoqda..."
+    )
+
+    task = summarize_text_task.delay(chat_id, text)
+    logger.info(f"Xulosa vazifasi: {task.id}")
+
+
+async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/weather buyrug'i"""
+    city = " ".join(context.args) if context.args else "Toshkent"
+    chat_id = update.effective_chat.id
+
+    await update.message.reply_text(
+        f"⏳ {city} uchun ob-havo tekshirilmoqda..."
+    )
+
+    task = weather_task.delay(chat_id, city)
+    logger.info(f"Ob-havo vazifasi: {task.id}")
+
+
+async def reminder_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/reminder buyrug'i — /reminder 5 Dori iching"""
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "❌ To'g'ri format kiriting!\n"
+            "⏰ Misol: `/reminder 5 Dori iching`\n"
+            "_(5 daqiqadan keyin eslatadi)_",
+            parse_mode="Markdown",
+        )
         return
 
     try:
-        await context.bot.send_message(
-            chat_id=target_id,
-            text=f"📨 <b>Bot egasidan javob:</b>\n\n{text}",
-            parse_mode="HTML"
+        minutes = int(context.args[0])
+        message = " ".join(context.args[1:])
+    except ValueError:
+        await update.message.reply_text("❌ Daqiqa soni butun son bo'lishi kerak!")
+        return
+
+    chat_id = update.effective_chat.id
+
+    await update.message.reply_text(
+        f"✅ Eslatma o'rnatildi!\n"
+        f"⏰ {minutes} daqiqadan keyin: *{message}*",
+        parse_mode="Markdown",
+    )
+
+    # countdown_seconds * 60
+    task = reminder_task.apply_async(
+        args=[chat_id, message],
+        countdown=minutes * 60,
+    )
+    logger.info(f"Eslatma vazifasi: {task.id} | {minutes} daqiqadan keyin")
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/status — faol vazifalar"""
+    tasks = context.user_data.get("tasks", [])
+    if not tasks:
+        await update.message.reply_text("📭 Sizda hozircha faol vazifalar yo'q.")
+        return
+
+    text = "📊 *Sizning vazifalaringiz:*\n\n"
+    for i, t in enumerate(tasks[-5:], 1):
+        text += f"{i}. `{t['type']}` — _{t['text']}..._\n   ID: `{t['id'][:8]}...`\n\n"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+# ===================== CALLBACK HANDLER =====================
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inline tugmalar uchun handler"""
+    query = update.callback_query
+    await query.answer()
+
+    prompts = {
+        "analyze": (
+            "📝 *Matn tahlili*\n\n"
+            "Buyruq: `/analyze <matningiz>`\n"
+            "Misol: `/analyze Bu film juda yaxshi edi!`\n\n"
+            "_Bot his-tuyg'ularni, kalit so'zlarni va matn uzunligini tahlil qiladi._"
+        ),
+        "translate": (
+            "🌍 *Tarjima*\n\n"
+            "Buyruq: `/translate <matningiz>`\n"
+            "Misol: `/translate Salom, qanday yashaysiz?`\n\n"
+            "_Matn o'zbek/rus tilidan inglizchaga tarjima qilinadi._"
+        ),
+        "summarize": (
+            "📋 *Qisqacha xulosa*\n\n"
+            "Buyruq: `/summarize <uzun matn>`\n\n"
+            "_Uzun matnni 2-3 jumlaga qisqartiradi._"
+        ),
+        "weather": (
+            "🌤 *Ob-havo*\n\n"
+            "Buyruq: `/weather <shahar nomi>`\n"
+            "Misol: `/weather Samarqand`\n\n"
+            "_Shahar ob-havo ma'lumotini ko'rsatadi._"
+        ),
+        "reminder": (
+            "⏰ *Eslatma*\n\n"
+            "Buyruq: `/reminder <daqiqa> <xabar>`\n"
+            "Misol: `/reminder 10 Choy iching!`\n\n"
+            "_Belgilangan vaqtdan keyin eslatma yuboradi._"
+        ),
+        "help": None,
+    }
+
+    if query.data == "help":
+        await help_command(update, context)
+        return
+
+    text = prompts.get(query.data, "❓ Noma'lum buyruq")
+    await query.edit_message_text(text=text, parse_mode="Markdown")
+
+
+# ===================== XABAR HANDLER =====================
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Oddiy xabarlarni qabul qilish"""
+    text = update.message.text
+    chat_id = update.effective_chat.id
+
+    # Qisqa matnlarni avtomatik tahlil qilish
+    if len(text) > 20:
+        await update.message.reply_text(
+            "💬 Matn qabul qilindi!\n\n"
+            "Nima qilishni xohlaysiz?\n"
+            "• `/analyze` — tahlil qilish\n"
+            "• `/translate` — tarjima qilish\n"
+            "• `/summarize` — xulosa chiqarish",
+            parse_mode="Markdown",
         )
-        await update.message.reply_text("✅ Javobingiz muvaffaqiyatli yuborildi!")
-        del context.user_data["reply_to_user"]
-    except Exception as e:
-        await update.message.reply_text(f"❌ Xabar yuborishda xatolik: {e}")
+    else:
+        await update.message.reply_text(
+            "👋 Salom! `/help` buyrug'ini kiriting yoki menyu tugmalaridan foydalaning."
+        )
 
-# ... (hamma funksiyalar va handlerlar shu yerdan yuqorida bo'lsin) ...
 
-def main():
-    # Tokenni o'zgaruvchidan oling
-    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+# ===================== MAIN =====================
 
-    # Handlerlarni shu yerga qo'shing
-    app.add_handler(CommandHandler("start", start_command))
-    # ... boshqa handlerlar ...
+def main() -> None:
+    """Botni ishga tushirish"""
+    logger.info("🤖 Jarvis Yordamchim ishga tushmoqda...")
 
-    print("🚀 Bot barqaror rejimda yuritildi!")
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    # Buyruqlar
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("analyze", analyze_command))
+    app.add_handler(CommandHandler("translate", translate_command))
+    app.add_handler(CommandHandler("summarize", summarize_command))
+    app.add_handler(CommandHandler("weather", weather_command))
+    app.add_handler(CommandHandler("reminder", reminder_command))
+    app.add_handler(CommandHandler("status", status_command))
+
+    # Callback va xabarlar
+    app.add_handler(CallbackQueryHandler(button_callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    logger.info("✅ Bot tayyor! Polling boshlandi...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == '__main__':
-    main() # Faqat shu joyda chaqiriladi
+
+if __name__ == "__main__":
+    main()
