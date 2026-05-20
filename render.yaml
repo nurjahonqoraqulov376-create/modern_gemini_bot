@@ -1,19 +1,24 @@
 # ================================================
 # Jarvis Yordamchim — Render.com Deploy
 # ================================================
-# render.yaml faylingiz
 
 services:
-  # 1. Telegram Bot (Web Service)
-  - type: web
+  # 1. Telegram Bot — Background Worker (Web Service EMAS!)
+  #    Bot polling qiladi, HTTP port kerak emas
+  - type: worker
     name: jarvis-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
       - key: BOT_TOKEN
-        sync: false  # Dashboard'da qo'lda kiritasiz
+        sync: false          # Render Dashboard'da qo'lda kiritasiz
       - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: jarvis-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
         fromService:
           type: redis
           name: jarvis-redis
@@ -21,9 +26,9 @@ services:
       - key: WEATHER_API_KEY
         sync: false
 
-  # 2. Celery Worker (Background Worker)
+  # 2. Celery Worker — Background Worker
   - type: worker
-    name: jarvis-worker
+    name: jarvis-celery-worker
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: celery --app tasks worker --loglevel info --concurrency 4
@@ -35,15 +40,20 @@ services:
           type: redis
           name: jarvis-redis
           property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: jarvis-redis
+          property: connectionString
       - key: WEATHER_API_KEY
         sync: false
 
-  # 3. Flower Monitor (ixtiyoriy)
+  # 3. Flower Monitor — Web Service (ixtiyoriy)
   - type: web
     name: jarvis-flower
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: celery flower --app tasks --loglevel info
+    startCommand: celery flower --app tasks --port $PORT
     envVars:
       - key: CELERY_BROKER_URL
         fromService:
@@ -51,7 +61,7 @@ services:
           name: jarvis-redis
           property: connectionString
 
-# Redis
+# Redis (Broker + Backend)
 databases:
   - type: redis
     name: jarvis-redis
