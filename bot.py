@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     filters, ContextTypes, CallbackQueryHandler
@@ -163,25 +164,26 @@ async def handle_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"❌ Xabar yuborishda xatolik: {e}")
 
 
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+if __name__ == '__main__':
+    # Tokenni o'zgaruvchidan olyapmiz
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Handler'laringizni qo'shing
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
-    # Ega javob yozayotganini ushlab qolish filtri
-    app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & filters.Chat(OWNER_CHAT_ID),
-        handle_owner_reply
-    ))
+    # Ega (admin) uchun filtr
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Chat(int(OWNER_CHAT_ID)), handle_owner_reply))
 
-    # Boshqa barcha matnli xabarlar uchun
+    # Boshqa xabarlar uchun
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("🚀 Bot barqaror rejimda yuritildi!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    print("🚀 Bot barqaror rejimda yuritildi!")
 
+    # Eng muhim qism: asinxron loop'ni ishga tushirish
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
