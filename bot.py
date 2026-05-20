@@ -163,37 +163,18 @@ async def handle_owner_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         await update.message.reply_text(f"❌ Xabar yuborishda xatolik: {e}")
 
+# ... (hamma funksiyalar va handlerlar shu yerdan yuqorida bo'lsin) ...
 
-if __name__ == '__main__':
-    # Tokenni o'zgaruvchidan olyapmiz
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+def main():
+    # Tokenni o'zgaruvchidan oling
+    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
-    # Handler'laringizni qo'shing
+    # Handlerlarni shu yerga qo'shing
     app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-
-    # Ega (admin) uchun filtr
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Chat(int(OWNER_CHAT_ID)), handle_owner_reply))
-
-    # Boshqa xabarlar uchun
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # ... boshqa handlerlar ...
 
     print("🚀 Bot barqaror rejimda yuritildi!")
-
-    # Eng muhim qism: asinxron loop'ni ishga tushirish
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
-
-# ... (boshqa kodlar)
-
 if __name__ == '__main__':
-    app = ApplicationBuilder().token("TOKENINGIZ").build()
-
-    # Handlerlarni qo'shing
-    # ...
-
-    # Mana shu qator eng muhimi!
-    print("Bot ishga tushdi...")
-    app.run_polling()
+    main() # Faqat shu joyda chaqiriladi
