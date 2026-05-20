@@ -1,31 +1,32 @@
 """
-Jarvis Yordamchim — Celery Vazifalar (Tasks)
-Background'da ishlaydigan barcha vazifalar shu yerda
+Jarvis Yordamchim — Celery Vazifalar
+Sun'iy intellekt: Claude API (Anthropic) — BEPUL TIER bor
 """
 
 import os
 import time
+import asyncio
 import requests
 import logging
 from celery import Celery
 from telegram import Bot
 from telegram.error import TelegramError
+import anthropic
 
 logger = logging.getLogger(__name__)
 
-# ===================== CELERY SOZLASH =====================
+# ===================== SOZLAMALAR =====================
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "")  # OpenWeatherMap API key
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 celery_app = Celery(
     "jarvis_tasks",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
 )
-
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -35,344 +36,265 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    # Qayta urinish sozlamalari
     task_max_retries=3,
-    task_default_retry_delay=60,
+    task_default_retry_delay=30,
 )
 
 
-# ===================== YORDAMCHI FUNKSIYA =====================
+# ===================== TELEGRAM XABAR =====================
 
-def send_telegram_message(chat_id: int, text: str) -> bool:
-    """Telegram orqali xabar yuborish"""
-    try:
+def send_message(chat_id: int, text: str) -> bool:
+    """Telegram xabar yuborish — asyncio.run() bilan"""
+    async def _send():
         bot = Bot(token=BOT_TOKEN)
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(
-            bot.send_message(
+        async with bot:
+            await bot.send_message(
                 chat_id=chat_id,
                 text=text,
                 parse_mode="Markdown",
             )
-        )
-        loop.close()
+    try:
+        asyncio.run(_send())
         return True
-    except TelegramError as e:
+    except Exception as e:
         logger.error(f"Xabar yuborishda xato: {e}")
         return False
 
 
-def simple_sentiment(text: str) -> str:
-    """Oddiy his-tuyg'u tahlili"""
-    positive_words = [
-        "yaxshi", "ajoyib", "zo'r", "barakali", "chiroyli", "sevaman",
-        "xursand", "good", "great", "excellent", "nice", "love", "happy",
-        "хорошо", "отлично", "замечательно", "люблю",
-    ]
-    negative_words = [
-        "yomon", "dahshatli", "xafa", "achinish", "qo'rqinch",
-        "bad", "terrible", "hate", "sad", "awful",
-        "плохо", "ужасно", "ненавижу", "грустно",
-    ]
-
-    text_lower = text.lower()
-    pos = sum(1 for w in positive_words if w in text_lower)
-    neg = sum(1 for w in negative_words if w in text_lower)
-
-    if pos > neg:
-        return "😊 Ijobiy"
-    elif neg > pos:
-        return "😞 Salbiy"
-    else:
-        return "😐 Neytral"
+def edit_message(chat_id: int, message_id: int, text: str) -> bool:
+    """Mavjud xabarni tahrirlash"""
+    async def _edit():
+        bot = Bot(token=BOT_TOKEN)
+        async with bot:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode="Markdown",
+            )
+    try:
+        asyncio.run(_edit())
+        return True
+    except Exception as e:
+        # Tahrirlab bo'lmasa, yangi xabar yuborish
+        logger.warning(f"Tahrirlash xatosi, yangi xabar yuboriladi: {e}")
+        send_message(chat_id, text)
+        return False
 
 
-def detect_language(text: str) -> str:
-    """Tilni aniqlash (oddiy)"""
-    cyrillic = sum(1 for c in text if "\u0400" <= c <= "\u04FF")
-    latin = sum(1 for c in text if "a" <= c.lower() <= "z")
+# ===================== CLAUDE AI VAZIFA =====================
 
-    if cyrillic > latin:
-        # O'zbek yoki Rus
-        uzbek_words = ["va", "bu", "ham", "emas", "uchun", "bilan", "salom", "yaxshi"]
-        if any(w in text.lower() for w in uzbek_words):
-            return "🇺🇿 O'zbek tili"
-        return "🇷🇺 Rus tili"
-    return "🇬🇧 Ingliz tili"
+@celery_app.task(bind=True, name="tasks.ask_ai")
+def ask_ai_task(self, chat_id: int, question: str, message_id: int = None) -> dict:
+    """
+    Claude AI ga savol yuborish va javob olish.
+    Anthropic API ishlatiladi.
+    """
+    try:
+        if not ANTHROPIC_API_KEY:
+            text = (
+                "⚠️ *ANTHROPIC\\_API\\_KEY sozlanmagan!*\n\n"
+                "1. [console.anthropic.com](https://console.anthropic.com) ga kiring\n"
+                "2. API key oling (bepul kredit beriladi)\n"
+                "3. Railway'da `ANTHROPIC_API_KEY` ni qo'shing"
+            )
+            if message_id:
+                edit_message(chat_id, message_id, text)
+            else:
+                send_message(chat_id, text)
+            return {"status": "no_api_key"}
+
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        # Claude API ga so'rov
+        response = client.messages.create(
+            model="claude-haiku-4-5",  # Eng tez va arzon model
+            max_tokens=1024,
+            system=(
+                "Siz Jarvis — o'zbek tilida javob beradigan aqlli yordamchisiz. "
+                "Qisqa, aniq va foydali javoblar bering. "
+                "Markdown formatlashdan foydalaning (bold, italic, code). "
+                "Javob 500 so'zdan oshmasin."
+            ),
+            messages=[
+                {"role": "user", "content": question}
+            ],
+        )
+
+        answer = response.content[0].text
+
+        result_text = (
+            f"🤖 *Jarvis AI javobi:*\n"
+            f"{'─' * 28}\n\n"
+            f"{answer}\n\n"
+            f"_Model: Claude Haiku_"
+        )
+
+        if message_id:
+            edit_message(chat_id, message_id, result_text)
+        else:
+            send_message(chat_id, result_text)
+
+        return {"status": "success"}
+
+    except anthropic.AuthenticationError:
+        text = "❌ API kalit noto'g'ri! `ANTHROPIC_API_KEY` ni tekshiring."
+        if message_id:
+            edit_message(chat_id, message_id, text)
+        else:
+            send_message(chat_id, text)
+        return {"status": "auth_error"}
+
+    except anthropic.RateLimitError:
+        text = "⏳ AI so'rovlar limiti to'ldi. Bir daqiqadan keyin qayta urinib ko'ring."
+        if message_id:
+            edit_message(chat_id, message_id, text)
+        else:
+            send_message(chat_id, text)
+        return {"status": "rate_limit"}
+
+    except Exception as exc:
+        logger.error(f"AI xatosi: {exc}")
+        text = f"❌ Xato yuz berdi: {str(exc)[:100]}"
+        if message_id:
+            edit_message(chat_id, message_id, text)
+        else:
+            send_message(chat_id, text)
+        raise self.retry(exc=exc, countdown=30)
 
 
-# ===================== CELERY VAZIFALAR =====================
+# ===================== MATN TAHLIL =====================
 
 @celery_app.task(bind=True, name="tasks.analyze_text")
 def analyze_text_task(self, chat_id: int, text: str) -> dict:
-    """
-    Matnni tahlil qilish vazifasi
-    - His-tuyg'u tahlili
-    - Til aniqlash
-    - Statistika
-    """
+    """Matnni AI orqali tahlil qilish"""
     try:
-        logger.info(f"Tahlil boshlandi: chat_id={chat_id}")
+        if not ANTHROPIC_API_KEY:
+            send_message(chat_id, "⚠️ `ANTHROPIC_API_KEY` sozlanmagan!")
+            return {"status": "no_api_key"}
 
-        # Ishlov berish vaqtini simulyatsiya qilish
-        time.sleep(2)
-
-        # Tahlil
-        words = text.split()
-        sentences = text.split(".")
-        sentiment = simple_sentiment(text)
-        language = detect_language(text)
-
-        # Kalit so'zlar (eng uzun so'zlar)
-        keywords = sorted(set(words), key=len, reverse=True)[:5]
-        keywords_str = ", ".join(f"`{k}`" for k in keywords if len(k) > 3)
-
-        result_text = (
-            f"📊 *Matn Tahlili Natijasi*\n"
-            f"{'─' * 30}\n\n"
-            f"🌐 *Til:* {language}\n"
-            f"💭 *His-tuyg'u:* {sentiment}\n\n"
-            f"📈 *Statistika:*\n"
-            f"• So'zlar soni: `{len(words)}`\n"
-            f"• Jumlalar soni: `{len([s for s in sentences if s.strip()])}`\n"
-            f"• Belgilar soni: `{len(text)}`\n"
-            f"• O'rtacha so'z uzunligi: `{sum(len(w) for w in words) // max(len(words), 1)}` harf\n\n"
-            f"🔑 *Kalit so'zlar:*\n{keywords_str or '_Topilmadi_'}\n\n"
-            f"✅ Tahlil muvaffaqiyatli bajarildi!"
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=800,
+            system="Siz matn tahlilchisisiz. O'zbek tilida javob bering. Markdown ishlating.",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Quyidagi matnni tahlil qiling:\n\n'{text}'\n\n"
+                    "Quyidagilarni ko'rsating:\n"
+                    "1. His-tuyg'u (ijobiy/salbiy/neytral)\n"
+                    "2. Asosiy mavzu\n"
+                    "3. Kalit so'zlar\n"
+                    "4. Qisqacha baho"
+                )
+            }],
         )
 
-        send_telegram_message(chat_id, result_text)
-        logger.info(f"Tahlil yakunlandi: chat_id={chat_id}")
-        return {"status": "success", "chat_id": chat_id}
-
-    except Exception as exc:
-        logger.error(f"Tahlilda xato: {exc}")
-        send_telegram_message(chat_id, f"❌ Tahlil paytida xato yuz berdi: {exc}")
-        raise self.retry(exc=exc, countdown=30)
-
-
-@celery_app.task(bind=True, name="tasks.translate_text")
-def translate_text_task(self, chat_id: int, text: str) -> dict:
-    """
-    Matnni tarjima qilish vazifasi
-    MyMemory API (bepul) ishlatiladi
-    """
-    try:
-        logger.info(f"Tarjima boshlandi: chat_id={chat_id}")
-        time.sleep(1)
-
-        # MyMemory bepul tarjima API
-        url = "https://api.mymemory.translated.net/get"
-        params = {
-            "q": text,
-            "langpair": "uz|en",  # O'zbekdan inglizga
-        }
-
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-
-        if data.get("responseStatus") == 200:
-            translated = data["responseData"]["translatedText"]
-            match_quality = data["responseData"].get("match", 0)
-
-            result_text = (
-                f"🌍 *Tarjima Natijasi*\n"
-                f"{'─' * 30}\n\n"
-                f"📥 *Asl matn:*\n_{text}_\n\n"
-                f"📤 *Inglizcha:*\n*{translated}*\n\n"
-                f"🎯 Aniqlik: `{int(float(match_quality) * 100)}%`\n\n"
-                f"✅ Tarjima muvaffaqiyatli!"
-            )
-        else:
-            result_text = (
-                f"⚠️ Tarjima xizmati vaqtincha ishlamayapti.\n"
-                f"Keyinroq qayta urinib ko'ring."
-            )
-
-        send_telegram_message(chat_id, result_text)
-        return {"status": "success", "chat_id": chat_id}
-
-    except requests.Timeout:
-        send_telegram_message(chat_id, "⏱ Tarjima xizmati javob bermadi. Qayta urinib ko'ring.")
-        raise self.retry(exc=Exception("Timeout"), countdown=30)
-    except Exception as exc:
-        logger.error(f"Tarjimada xato: {exc}")
-        send_telegram_message(chat_id, f"❌ Tarjima xatosi: {exc}")
-        raise self.retry(exc=exc, countdown=60)
-
-
-@celery_app.task(bind=True, name="tasks.summarize_text")
-def summarize_text_task(self, chat_id: int, text: str) -> dict:
-    """
-    Matnni qisqacha xulosa qilish
-    """
-    try:
-        logger.info(f"Xulosa boshlandi: chat_id={chat_id}")
-        time.sleep(2)
-
-        words = text.split()
-        total_words = len(words)
-
-        if total_words < 20:
-            send_telegram_message(
-                chat_id,
-                "ℹ️ Matn xulosa qilish uchun juda qisqa (kamida 20 so'z kerak)."
-            )
-            return {"status": "skipped"}
-
-        # Oddiy ekstrakt usuli: birinchi va oxirgi jumlalar
-        sentences = [s.strip() for s in text.replace("!", ".").replace("?", ".").split(".") if s.strip()]
-
-        if len(sentences) <= 2:
-            summary = text
-        elif len(sentences) <= 5:
-            summary = f"{sentences[0]}. {sentences[-1]}."
-        else:
-            # Muhim jumlalarni tanlash (uzunligi o'rtachadan yuqori)
-            avg_len = sum(len(s) for s in sentences) / len(sentences)
-            important = [s for s in sentences if len(s) > avg_len][:3]
-            summary = ". ".join(important) + "."
-
-        compression = int((1 - len(summary.split()) / total_words) * 100)
-
-        result_text = (
-            f"📋 *Qisqacha Xulosa*\n"
-            f"{'─' * 30}\n\n"
-            f"📄 *Asl matn:* `{total_words}` so'z\n"
-            f"✂️ *Xulosa:* `{len(summary.split())}` so'z\n"
-            f"📉 *Qisqarish:* `{compression}%`\n\n"
-            f"💡 *Xulosa:*\n_{summary}_\n\n"
-            f"✅ Xulosa tayyor!"
+        result = (
+            f"📊 *Matn Tahlili*\n"
+            f"{'─' * 28}\n\n"
+            f"{response.content[0].text}"
         )
-
-        send_telegram_message(chat_id, result_text)
+        send_message(chat_id, result)
         return {"status": "success"}
 
     except Exception as exc:
-        logger.error(f"Xulosada xato: {exc}")
-        send_telegram_message(chat_id, f"❌ Xulosa chiqarishda xato: {exc}")
+        logger.error(f"Tahlil xatosi: {exc}")
+        send_message(chat_id, f"❌ Tahlil xatosi: {str(exc)[:100]}")
         raise self.retry(exc=exc, countdown=30)
 
 
-@celery_app.task(bind=True, name="tasks.weather")
-def weather_task(self, chat_id: int, city: str) -> dict:
-    """
-    Ob-havo ma'lumotini olish
-    OpenWeatherMap API ishlatiladi
-    """
+# ===================== TARJIMA =====================
+
+@celery_app.task(bind=True, name="tasks.translate_text")
+def translate_text_task(self, chat_id: int, text: str) -> dict:
+    """Matnni AI orqali tarjima qilish"""
     try:
-        logger.info(f"Ob-havo so'rovi: {city}")
-        time.sleep(1)
+        if not ANTHROPIC_API_KEY:
+            send_message(chat_id, "⚠️ `ANTHROPIC_API_KEY` sozlanmagan!")
+            return {"status": "no_api_key"}
 
-        api_key = WEATHER_API_KEY
-
-        if not api_key:
-            # API key yo'q bo'lsa, demo ma'lumot
-            result_text = (
-                f"🌤 *{city} — Ob-havo*\n"
-                f"{'─' * 30}\n\n"
-                f"⚠️ Ob-havo API kaliti sozlanmagan.\n\n"
-                f"🔧 `.env` faylga `WEATHER_API_KEY` qo'shing:\n"
-                f"1. [openweathermap.org](https://openweathermap.org/api) ga kiring\n"
-                f"2. Bepul ro'yxatdan o'ting\n"
-                f"3. API kalitni `.env` faylga qo'shing\n\n"
-                f"📍 *Demo ma'lumot ({city}):*\n"
-                f"🌡 Harorat: `24°C`\n"
-                f"💧 Namlik: `45%`\n"
-                f"💨 Shamol: `3 m/s`\n"
-                f"☀️ Holat: Quyoshli"
-            )
-        else:
-            url = "https://api.openweathermap.org/data/2.5/weather"
-            params = {
-                "q": city,
-                "appid": api_key,
-                "units": "metric",
-                "lang": "uz",
-            }
-            response = requests.get(url, params=params, timeout=10)
-            data = response.json()
-
-            if response.status_code == 200:
-                temp = data["main"]["temp"]
-                feels_like = data["main"]["feels_like"]
-                humidity = data["main"]["humidity"]
-                wind = data["wind"]["speed"]
-                desc = data["weather"][0]["description"].capitalize()
-                icon_map = {
-                    "Clear": "☀️", "Clouds": "☁️", "Rain": "🌧",
-                    "Snow": "❄️", "Thunderstorm": "⛈", "Drizzle": "🌦",
-                    "Mist": "🌫", "Fog": "🌫",
-                }
-                weather_main = data["weather"][0]["main"]
-                icon = icon_map.get(weather_main, "🌤")
-
-                result_text = (
-                    f"{icon} *{city} — Ob-havo*\n"
-                    f"{'─' * 30}\n\n"
-                    f"🌡 *Harorat:* `{temp:.1f}°C`\n"
-                    f"🤔 *His qilish:* `{feels_like:.1f}°C`\n"
-                    f"💧 *Namlik:* `{humidity}%`\n"
-                    f"💨 *Shamol:* `{wind} m/s`\n"
-                    f"☁️ *Holat:* {desc}\n\n"
-                    f"✅ Ma'lumot yangilangan!"
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=1000,
+            system="Siz professional tarjimonisiz.",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Quyidagi matnni ingliz tiliga tarjima qiling.\n\n"
+                    f"Matn: {text}\n\n"
+                    f"Faqat tarjimani yozing, izoh yozmang."
                 )
-            else:
-                result_text = (
-                    f"❌ `{city}` shahri topilmadi.\n"
-                    "To'g'ri shahar nomini kiriting."
-                )
+            }],
+        )
 
-        send_telegram_message(chat_id, result_text)
-        return {"status": "success", "city": city}
+        translated = response.content[0].text
+        result = (
+            f"🌍 *Tarjima Natijasi*\n"
+            f"{'─' * 28}\n\n"
+            f"📥 *Asl:*\n_{text}_\n\n"
+            f"📤 *Inglizcha:*\n*{translated}*"
+        )
+        send_message(chat_id, result)
+        return {"status": "success"}
 
     except Exception as exc:
-        logger.error(f"Ob-havo xatosi: {exc}")
-        send_telegram_message(chat_id, "❌ Ob-havo ma'lumotini olishda xato yuz berdi.")
-        raise self.retry(exc=exc, countdown=60)
+        logger.error(f"Tarjima xatosi: {exc}")
+        send_message(chat_id, f"❌ Tarjima xatosi: {str(exc)[:100]}")
+        raise self.retry(exc=exc, countdown=30)
 
+
+# ===================== XULOSA =====================
+
+@celery_app.task(bind=True, name="tasks.summarize_text")
+def summarize_text_task(self, chat_id: int, text: str) -> dict:
+    """Matnni AI orqali qisqartirish"""
+    try:
+        if not ANTHROPIC_API_KEY:
+            send_message(chat_id, "⚠️ `ANTHROPIC_API_KEY` sozlanmagan!")
+            return {"status": "no_api_key"}
+
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=500,
+            system="Siz matnni qisqartiruvchi ekspertsiz. O'zbek tilida javob bering.",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Quyidagi matnni 3-4 jumlaga qisqartiring:\n\n{text}"
+                )
+            }],
+        )
+
+        summary = response.content[0].text
+        result = (
+            f"📋 *Qisqacha Xulosa*\n"
+            f"{'─' * 28}\n\n"
+            f"{summary}\n\n"
+            f"_Asl matn: {len(text.split())} so'z → {len(summary.split())} so'z_"
+        )
+        send_message(chat_id, result)
+        return {"status": "success"}
+
+    except Exception as exc:
+        logger.error(f"Xulosa xatosi: {exc}")
+        send_message(chat_id, f"❌ Xulosa xatosi: {str(exc)[:100]}")
+        raise self.retry(exc=exc, countdown=30)
+
+
+# ===================== ESLATMA =====================
 
 @celery_app.task(bind=True, name="tasks.reminder")
 def reminder_task(self, chat_id: int, message: str) -> dict:
-    """
-    Eslatma vazifasi — belgilangan vaqtda xabar yuboradi
-    Bu vazifa apply_async(countdown=...) bilan chaqiriladi
-    """
+    """Eslatma xabarini yuborish"""
     try:
-        logger.info(f"Eslatma yuborilmoqda: chat_id={chat_id}")
-
-        result_text = (
-            f"⏰ *ESLATMA!*\n"
-            f"{'─' * 30}\n\n"
-            f"🔔 {message}\n\n"
-            f"_Jarvis Yordamchim eslatmasi_"
+        send_message(
+            chat_id,
+            f"⏰ *ESLATMA!*\n{'─' * 28}\n\n🔔 {message}\n\n_Jarvis Yordamchim_"
         )
-
-        send_telegram_message(chat_id, result_text)
-        return {"status": "success", "message": message}
-
+        return {"status": "success"}
     except Exception as exc:
-        logger.error(f"Eslatma xatosi: {exc}")
         raise self.retry(exc=exc, countdown=60)
-
-
-# ===================== DAVRIY VAZIFALAR =====================
-
-@celery_app.on_after_configure.connect
-def setup_periodic_tasks(sender, **kwargs):
-    """Har soatda bir marta ishlaydigan vazifalar"""
-    # Misol: har 6 soatda health check
-    sender.add_periodic_task(
-        6 * 60 * 60,  # 6 soat (soniyada)
-        health_check_task.s(),
-        name="health-check-every-6-hours",
-    )
-
-
-@celery_app.task(name="tasks.health_check")
-def health_check_task() -> dict:
-    """Bot sog'ligi tekshiruvi"""
-    logger.info("✅ Health check: Bot ishlayapti!")
-    return {"status": "healthy", "timestamp": time.time()}

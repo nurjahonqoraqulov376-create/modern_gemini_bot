@@ -1,167 +1,74 @@
-# 🤖 Jarvis Yordamchim — Telegram Bot
+# 🤖 Jarvis Yordamchim — AI Telegram Bot
 
-**Celery + Redis** orqali background vazifalarni bajaradigan aqlli Telegram bot.
-
----
-
-## 📦 Arxitektura
-
-```
-Foydalanuvchi
-     │
-     ▼
-Telegram Bot (bot.py)
-     │  Vazifa yuboradi
-     ▼
-Redis (Broker)
-     │  Vazifalarni saqlaydi
-     ▼
-Celery Worker (tasks.py)
-     │  Background'da bajaradi
-     ▼
-Natija → Foydalanuvchiga xabar
-```
+**100% BEPUL** — Railway.app + Anthropic (bepul kredit)
 
 ---
 
-## 🚀 Ishga tushirish (Local)
+## Kerakli narsalar (barchasi bepul)
 
-### 1. Redis o'rnatish
-
-**Ubuntu/Debian:**
-```bash
-sudo apt install redis-server
-sudo systemctl start redis
-```
-
-**macOS:**
-```bash
-brew install redis
-brew services start redis
-```
-
-**Windows:**
-```bash
-# WSL yoki Docker ishlatish tavsiya etiladi
-docker run -d -p 6379:6379 redis:alpine
-```
-
-### 2. Python kutubxonalari
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. .env fayl yaratish
-
-```bash
-cp .env.example .env
-# .env faylni oching va ma'lumotlaringizni kiriting
-```
-
-**BOT_TOKEN olish:**
-1. Telegramda [@BotFather](https://t.me/BotFather) ga yozing
-2. `/newbot` buyrug'ini yuboring
-3. Bot nomini kiriting: `jarvis_yordamchim`
-4. Token nusxalab, `.env` faylga qo'ying
-
-### 4. Ishga tushirish (3 terminal)
-
-**Terminal 1 — Celery Worker:**
-```bash
-celery --app tasks worker --loglevel info --concurrency 4
-```
-
-**Terminal 2 — Flower Monitor (ixtiyoriy):**
-```bash
-celery flower --app tasks --loglevel info
-# http://localhost:5555 da ko'rasiz
-```
-
-**Terminal 3 — Bot:**
-```bash
-python bot.py
-```
+| Xizmat | Link | Narx |
+|--------|------|------|
+| Bot token | @BotFather (Telegram) | Bepul |
+| AI (Claude) | console.anthropic.com | Bepul kredit ($5) |
+| Hosting | railway.app | Bepul tier |
+| Redis | Railway'da qo'shiladi | Bepul |
 
 ---
 
-## ☁️ Render.com'ga Deploy qilish
+## Railway.app ga deploy (BEPUL)
 
-### Avtomatik (render.yaml bilan):
-1. GitHub'ga push qiling
-2. [render.com](https://render.com) ga kiring
-3. **New → Blueprint** tanlang
-4. Repository'ni ulang
-5. `BOT_TOKEN` va `WEATHER_API_KEY` ni kiriting
-6. **Deploy** bosing!
+### 1. Anthropic API key oling
+1. [console.anthropic.com](https://console.anthropic.com) ga kiring
+2. Ro'yxatdan o'ting (bepul $5 kredit beriladi)
+3. **API Keys** → **Create Key** → nusxalab oling
 
-### Qo'lda:
-1. Render'da **Redis** yaratin (noeviction, Starter)
-2. Internal URL ni nusxalab oling
-3. **Background Worker** yaratin (celery worker)
-4. **Web Service** yaratin (bot)
-5. Har ikkalasiga `CELERY_BROKER_URL` va `BOT_TOKEN` qo'shing
+### 2. Railway'ga deploy qiling
+1. [railway.app](https://railway.app) ga kiring (GitHub bilan)
+2. **New Project** → **Deploy from GitHub repo**
+3. Repo'ni ulang
 
----
+### 3. Redis qo'shing
+1. Railway loyiha ichida **+ New** → **Database** → **Redis**
+2. Redis qo'shilgach, `REDIS_URL` avtomatik paydo bo'ladi
 
-## 🎯 Bot Buyruqlari
+### 4. Environment Variables
+Railway → Loyiha → **Variables** bo'limiga qo'shing:
 
-| Buyruq | Vazifa |
-|--------|--------|
-| `/start` | Botni boshlash, menyu |
-| `/analyze <matn>` | Matnni tahlil qilish |
-| `/translate <matn>` | Inglizchaga tarjima |
-| `/summarize <matn>` | Qisqacha xulosa |
-| `/weather <shahar>` | Ob-havo ma'lumoti |
-| `/reminder 10 Dori!` | 10 daqiqadan keyin eslatma |
-| `/status` | Faol vazifalar |
-| `/help` | Yordam |
-
----
-
-## 🔧 Yangi Vazifa Qo'shish
-
-`tasks.py` faylga qo'shish:
-
-```python
-@celery_app.task(bind=True, name="tasks.mening_vazifam")
-def mening_vazifam(self, chat_id: int, parametr: str) -> dict:
-    try:
-        # Vazifani bajarish
-        natija = # ... kodni yozing
-        
-        send_telegram_message(chat_id, f"✅ Natija: {natija}")
-        return {"status": "success"}
-    except Exception as exc:
-        raise self.retry(exc=exc, countdown=30)
+```
+BOT_TOKEN = sizning_bot_tokeningiz
+ANTHROPIC_API_KEY = sizning_api_keyingiz
+CELERY_BROKER_URL = ${{Redis.REDIS_URL}}
+CELERY_RESULT_BACKEND = ${{Redis.REDIS_URL}}
 ```
 
-`bot.py` faylga import qiling va buyruq qo'shing.
+### 5. Ikki servis yarating
+
+**Servis 1 — Bot:**
+- Start Command: `python bot.py`
+
+**Servis 2 — Celery Worker:**
+- Start Command: `celery --app tasks worker --loglevel info`
 
 ---
 
-## 📊 Monitoring
+## Bot imkoniyatlari
 
-Flower orqali:
-- **http://localhost:5555** (local)
-- Render'da Flower service URL'i
-
-Ko'rasiz:
-- Nechta worker ishlamoqda
-- Bajarilgan vazifalar soni
-- Muvaffaqiyatsiz vazifalar
-- Real vaqt statistika
+- 🧠 **AI savol** — istalgan savolga Claude javob beradi
+- 📝 **Tahlil** — matn his-tuyg'u va mavzu tahlili
+- 🌍 **Tarjima** — har qanday tilga tarjima
+- 📋 **Xulosa** — uzun matnni qisqartirish
+- ⏰ **Eslatma** — vaqtli eslatmalar
+- 💬 **Har xabarga AI javob** — buyruqsiz ham ishlaydi
 
 ---
 
-## 📄 Fayl Tuzilishi
+## Fayl tuzilishi
 
 ```
 jarvis_yordamchim/
-├── bot.py          # Telegram bot (asosiy fayl)
-├── tasks.py        # Celery vazifalar
+├── bot.py           # Telegram bot
+├── tasks.py         # Celery + AI vazifalar
 ├── requirements.txt
-├── render.yaml     # Render.com deploy
-├── .env.example    # Sozlamalar namunasi
+├── .env.example     # Sozlamalar namunasi
 └── README.md
 ```
