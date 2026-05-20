@@ -32,11 +32,9 @@ generation_config = {
     "top_k": 40,
     "max_output_tokens": 2048,
 }
-
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
-    generation_config=generation_config,
-    tools=[{"google_search": {}}]  # Jonli internet qidiruvi faol
+    generation_config=generation_config
 )
 
 
