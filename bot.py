@@ -185,5 +185,15 @@ if __name__ == '__main__':
     # Eng muhim qism: asinxron loop'ni ishga tushirish
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
-if __name__ == "__main__":
-    main()
+
+# ... (boshqa kodlar)
+
+if __name__ == '__main__':
+    app = ApplicationBuilder().token("TOKENINGIZ").build()
+
+    # Handlerlarni qo'shing
+    # ...
+
+    # Mana shu qator eng muhimi!
+    print("Bot ishga tushdi...")
+    app.run_polling()
